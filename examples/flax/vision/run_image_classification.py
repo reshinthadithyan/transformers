@@ -32,6 +32,7 @@ from typing import Callable, Optional
 import torch
 import torchvision
 import torchvision.transforms as transforms
+import wandb #CHANGE (reshinth) : Adding wandb logging
 from tqdm import tqdm
 
 import jax
@@ -54,7 +55,7 @@ from transformers import (
     set_seed,
 )
 from transformers.file_utils import get_full_repo_name
-
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,12 @@ class ModelArguments:
             "help": "Floating-point format in which the model weights should be initialized and trained. Choose one of `[float32, float16, bfloat16]`."
         },
     )
+    wandb_project : Optional[str] = field(
+        default="deepfake-img",
+        metadata={
+            "help" : "Adds capability to log data to wandb"
+        }
+    )
 
 
 @dataclass
@@ -128,6 +135,8 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "The number of processes to use for the preprocessing."},
     )
+
+
 
 
 class TrainState(train_state.TrainState):
@@ -196,6 +205,7 @@ def main():
     )
     # Setup logging, we only want one process per machine to log things on the screen.
     logger.setLevel(logging.INFO if jax.process_index() == 0 else logging.ERROR)
+    wandb.init(project="", entity="reshinth") #CHANGE(reshinth) : initializing wandb logging
     if jax.process_index() == 0:
         transformers.utils.logging.set_verbosity_info()
     else:
@@ -233,6 +243,7 @@ def main():
             ]
         ),
     )
+    
 
     eval_dataset = torchvision.datasets.ImageFolder(
         data_args.validation_dir,
@@ -374,7 +385,7 @@ def main():
 
         new_state = state.apply_gradients(grads=grad, dropout_rng=new_dropout_rng)
 
-        metrics = {"loss": loss, "learning_rate": linear_decay_lr_schedule_fn(state.step)}
+        metrics = {"train_loss": loss, "learning_rate": linear_decay_lr_schedule_fn(state.step)}
         metrics = jax.lax.pmean(metrics, axis_name="batch")
 
         return new_state, metrics
@@ -387,7 +398,7 @@ def main():
 
         # summarize metrics
         accuracy = (jnp.argmax(logits, axis=-1) == labels).mean()
-        metrics = {"loss": loss, "accuracy": accuracy}
+        metrics = {"eval_loss": loss, "eval_accuracy": accuracy} #making key changes to log different metric
         metrics = jax.lax.pmean(metrics, axis_name="batch")
         return metrics
 
@@ -421,6 +432,7 @@ def main():
         for batch in train_loader:
             batch = shard(batch)
             state, train_metric = p_train_step(state, batch)
+            wandb.log(train_metric) #logging train metric
             train_metrics.append(train_metric)
 
             train_step_progress_bar.update(1)
@@ -442,6 +454,7 @@ def main():
             # Model forward
             batch = shard(batch)
             metrics = p_eval_step(state.params, batch)
+            wandb.log(metrics)
             eval_metrics.append(metrics)
 
             eval_step_progress_bar.update(1)

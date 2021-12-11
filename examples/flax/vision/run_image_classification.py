@@ -64,6 +64,13 @@ MODEL_CONFIG_CLASSES = list(FLAX_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
+def preprocess_log_wandb(metrics_diction:dict):
+    """
+    args:
+            metrics_diction (dict) : Dictionary of metrics to be logged.
+    """
+    return {k:v.tolist() for k,v in metrics_diction.items()} 
+
 @dataclass
 class ModelArguments:
     """
@@ -432,7 +439,7 @@ def main():
         for batch in train_loader:
             batch = shard(batch)
             state, train_metric = p_train_step(state, batch)
-            wandb.log(train_metric) #logging train metric
+            wandb.log(preprocess_log_wandb(train_metric)) #logging train metric
             train_metrics.append(train_metric)
 
             train_step_progress_bar.update(1)
@@ -454,7 +461,7 @@ def main():
             # Model forward
             batch = shard(batch)
             metrics = p_eval_step(state.params, batch)
-            wandb.log(metrics)
+            wandb.log(preprocess_log_wandb(metrics))            
             eval_metrics.append(metrics)
 
             eval_step_progress_bar.update(1)
